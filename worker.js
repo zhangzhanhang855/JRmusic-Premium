@@ -1,6 +1,6 @@
 /**
  * JR AI Cloudflare Worker Gateway: jrmusic-premium
- * Handles User Auth & One-Time Code Redemption against CorporateDB
+ * Direct TCP connection to MongoDB via nodejs_compat
  */
 
 import { MongoClient } from 'mongodb';
@@ -13,8 +13,8 @@ let cachedClient = null;
 async function getDatabase() {
   if (!cachedClient) {
     cachedClient = new MongoClient(MONGO_URI, {
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
+      connectTimeoutMS: 8000,
+      socketTimeoutMS: 15000,
       maxPoolSize: 5,
     });
     await cachedClient.connect();
@@ -114,7 +114,9 @@ export default {
         const cleanCode = code.trim();
         const deleteResult = await codesCollection.findOneAndDelete({ code: cleanCode });
 
-        if (!deleteResult || !deleteResult.value && !deleteResult._id) {
+        // Checks for driver v5/v6 object shapes
+        const wasDeleted = deleteResult && (deleteResult.value || deleteResult._id || deleteResult.ok);
+        if (!wasDeleted) {
           return jsonResponse({ message: "Invalid or already used activation code" }, 400);
         }
 
