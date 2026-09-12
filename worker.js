@@ -1,16 +1,13 @@
 /**
- * Aether Cloudflare Worker API
- * Direct TCP connection to MongoDB instance via Node/Socket compatibility layer
- * Handles CORS, User Registration, Login, and One-time Activation Code Redemption
+ * JR AI Cloudflare Worker Gateway: jrmusic-premium
+ * Handles User Auth & One-Time Code Redemption against CorporateDB
  */
 
 import { MongoClient } from 'mongodb';
 
-// 你的 MongoDB 连接 URI
 const MONGO_URI = "mongodb://aleafs%40aliyun.com:Xl32cVfKQ6SJ@120.55.50.18:27017/CorporateDB?authSource=admin";
 const DB_NAME = "CorporateDB";
 
-// 全局客户端连接池缓存，避免每次冷启动重复建联
 let cachedClient = null;
 
 async function getDatabase() {
@@ -18,14 +15,13 @@ async function getDatabase() {
     cachedClient = new MongoClient(MONGO_URI, {
       connectTimeoutMS: 5000,
       socketTimeoutMS: 10000,
-      maxPoolSize: 10,
+      maxPoolSize: 5,
     });
     await cachedClient.connect();
   }
   return cachedClient.db(DB_NAME);
 }
 
-// 统一 CORS 响应头配置
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -44,7 +40,6 @@ function jsonResponse(data, status = 200) {
 
 export default {
   async fetch(request, env, ctx) {
-    // 处理浏览器 Preflight OPTIONS 请求
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
@@ -57,21 +52,21 @@ export default {
       const usersCollection = db.collection("users");
       const codesCollection = db.collection("activation_codes");
 
-      // 1. 用户注册接口
+      // 1. User Register
       if (path === "/api/register" && request.method === "POST") {
         const { username, password } = await request.json();
         if (!username || !password) {
-          return jsonResponse({ message: "Username and password required" }, 400);
+          return jsonResponse({ message: "Username and password are required" }, 400);
         }
 
         const existingUser = await usersCollection.findOne({ username });
         if (existingUser) {
-          return jsonResponse({ message: "Username already taken" }, 409);
+          return jsonResponse({ message: "Username already exists" }, 409);
         }
 
         const newUser = {
           username,
-          password, // 生产环境建议先由客户端 SHA-256 哈希
+          password,
           isActivated: false,
           redeemedCode: null,
           createdAt: new Date()
@@ -81,51 +76,48 @@ export default {
         return jsonResponse({
           message: "User registered successfully",
           user: {
-            id: result.insertedId,
+            id: result.insertedId.toString(),
             username: newUser.username,
             isActivated: false,
-            token: "auth_" + result.insertedId
+            token: "auth_" + result.insertedId.toString()
           }
         });
       }
 
-      // 2. 用户登录接口
+      // 2. User Login
       if (path === "/api/login" && request.method === "POST") {
         const { username, password } = await request.json();
         const user = await usersCollection.findOne({ username, password });
 
         if (!user) {
-          return jsonResponse({ message: "Invalid username or password" }, 401);
+          return jsonResponse({ message: "Invalid credentials" }, 401);
         }
 
         return jsonResponse({
           user: {
-            id: user._id,
+            id: user._id.toString(),
             username: user.username,
             isActivated: !!user.isActivated,
             redeemedCode: user.redeemedCode || null,
-            token: "auth_" + user._id
+            token: "auth_" + user._id.toString()
           }
         });
       }
 
-      // 3. 激活码兑换接口（原子验证并物理删除）
+      // 3. Redeem Activation Code (Atomic verification and deletion)
       if (path === "/api/redeem" && request.method === "POST") {
         const { username, code } = await request.json();
         if (!username || !code) {
-          return jsonResponse({ message: "Missing username or code" }, 400);
+          return jsonResponse({ message: "Username and code are required" }, 400);
         }
 
         const cleanCode = code.trim();
-
-        // 查找并从集合中物理删除该激活码，防止并发重复兑换
         const deleteResult = await codesCollection.findOneAndDelete({ code: cleanCode });
 
-        if (!deleteResult) {
-          return jsonResponse({ message: "Invalid or expired activation code" }, 400);
+        if (!deleteResult || !deleteResult.value && !deleteResult._id) {
+          return jsonResponse({ message: "Invalid or already used activation code" }, 400);
         }
 
-        // 更新目标用户的激活状态
         const updateResult = await usersCollection.updateOne(
           { username },
           { $set: { isActivated: true, redeemedCode: cleanCode, activatedAt: new Date() } }
@@ -136,27 +128,27 @@ export default {
         }
 
         return jsonResponse({
-          message: "Account successfully activated",
+          message: "Account activated successfully",
           isActivated: true,
           redeemedCode: cleanCode
         });
       }
 
-      // 4. 管理员接口：生成激活码（为后续管理面板预留）
+      // 4. Admin Code Generator
       if (path === "/api/admin/create-code" && request.method === "POST") {
         const { adminKey, code } = await request.json();
-        if (adminKey !== "YOUR_SECURE_ADMIN_SECRET") {
-          return jsonResponse({ message: "Unauthorized admin key" }, 403);
+        if (adminKey !== "JR_SECRET_ADMIN_KEY_2026") {
+          return jsonResponse({ message: "Unauthorized admin access" }, 403);
         }
 
-        const newCode = code ? code.trim() : "AETH-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+        const newCode = code ? code.trim() : "JR-" + Math.random().toString(36).substring(2, 10).toUpperCase();
         await codesCollection.insertOne({ code: newCode, createdAt: new Date() });
-        return jsonResponse({ message: "Code created", code: newCode });
+        return jsonResponse({ message: "Code created successfully", code: newCode });
       }
 
-      return jsonResponse({ message: "Not Found" }, 404);
+      return jsonResponse({ message: "Route Not Found" }, 404);
     } catch (err) {
-      return jsonResponse({ message: "Internal Engine Error", error: err.message }, 500);
+      return jsonResponse({ message: "Internal Server Error", error: err.message }, 500);
     }
   }
 };
