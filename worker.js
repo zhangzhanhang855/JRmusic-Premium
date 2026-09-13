@@ -9,7 +9,7 @@ const MONGO_URI = "mongodb://aleafs%40aliyun.com:Xl32cVfKQ6SJ@120.55.50.18:27017
 const DB_NAME = "CorporateDB";
 
 // 管理员校验秘钥（可在前端面板登录时输入）
-const ADMIN_SECRET = "JR_SECRET_ADMIN_KEY_2026";
+const ADMIN_SECRET = "CONGcong20121009@";
 
 let cachedClient = null;
 
